@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="反射シミュレーター">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>モンスト反射シミュレーター</title>
+<style>
+:root{color-scheme:dark;--bg:#0d1422;--panel:#172235;--line:#2a3b55;--text:#edf3ff;--muted:#9fb0c8;--accent:#69b7ff;--orange:#ffbf69}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,-apple-system,sans-serif;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom)}
+main{max-width:850px;margin:auto;padding:12px 0 30px}h1{font-size:21px;margin:8px 0 4px}.sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:12px;margin:10px 0}
+.canvas-wrap{width:100%;background:#070b12;border-radius:10px;overflow:hidden;touch-action:manipulation}
+canvas{display:block;width:100%;height:auto;max-height:65vh;object-fit:contain}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row>*{flex:1}
+button,.filebtn,select,input[type=number]{border:1px solid #40536f;background:#24344d;color:var(--text);border-radius:10px;padding:10px 12px;font:inherit}
+button:active,.filebtn:active{transform:scale(.98)}button.primary{background:#1769aa;border-color:#338bd0}button.warn{background:#633c24;border-color:#96613b}
+input[type=range]{width:100%;accent-color:var(--accent)}label{display:block;color:#c9d6e8;font-size:13px;margin:10px 0 5px}
+input[type=file]{display:none}.small{font-size:12px;color:var(--muted);line-height:1.55}.value{font-weight:700;color:#fff}.pill{display:inline-block;background:#263c59;border-radius:99px;padding:4px 9px;font-size:12px;color:#cfe6ff}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.grid button{width:100%}
+hr{border:0;border-top:1px solid var(--line);margin:12px 0}
+#status{font-size:13px;color:#b9d5f5;min-height:20px;margin-top:8px}
+@media(min-width:650px){.controls{display:grid;grid-template-columns:1fr 1fr;gap:12px}.controls .panel{margin:0}}
+</style>
+</head>
+<body>
+<main>
+<h1>モンスト反射シミュレーター</h1>
+<p class="sub">スクリーンショットを読み込み、発射角度と反射軌道を試せる試作版</p>
+<section class="panel">
+ <div class="row">
+  <label class="filebtn" for="imageFile" style="text-align:center">スクリーンショットを読み込む</label>
+  <input id="imageFile" type="file" accept="image/*">
+  <button id="resetView">画像をリセット</button>
+ </div>
+ <div class="canvas-wrap" style="margin-top:10px"><canvas id="stage" width="900" height="600"></canvas></div>
+ <div id="status">画像を読み込むか、サンプル画面で操作してください。</div>
+ <p class="small">画像上をタップして発射位置を指定できます。障害物・敵は下のモードを選んでキャンバス上を操作してください。</p>
+</section>
+<div class="controls">
+<section class="panel">
+ <b>軌道設定</b>
+ <label>発射角度：<span class="value" id="angleVal">35°</span></label>
+ <input id="angle" type="range" min="0" max="359" value="35">
+ <div class="row"><button id="rotateL">−5°</button><button id="rotateR">＋5°</button></div>
+ <label>最大反射回数：<span class="value" id="bounceVal">5回</span></label>
+ <input id="bounces" type="range" min="0" max="20" value="5">
+ <label>軌道の長さ：<span class="value" id="lengthVal">画面内を十分進む</span></label>
+ <input id="length" type="range" min="500" max="6000" step="100" value="3000">
+ <div class="row"><button class="primary" id="simulate">軌道を計算</button><button id="clearPath">軌道を消す</button></div>
+</section>
+<section class="panel">
+ <b>ステージ編集</b>
+ <label>操作モード</label>
+ <select id="mode" style="width:100%">
+  <option value="launch">発射位置を指定</option>
+  <option value="block">ブロックを追加（ドラッグ）</option>
+  <option value="enemy">敵キャラを追加（タップ）</option>
+  <option value="erase">配置物を削除（タップ）</option>
+ </select>
+ <div class="grid" style="margin-top:9px">
+  <button id="undo">最後の配置を戻す</button><button id="clearObjects" class="warn">配置物を全消去</button>
+ </div>
+ <hr>
+ <b>自動認識（実験機能）</b>
+ <p class="small">画像内の暗い領域をブロック候補として抽出します。背景や演出も検出する場合があるため、候補を確認して手動で修正してください。</p>
+ <button id="autoDetect" style="width:100%">ブロック候補を自動検出</button>
+ <button id="clearDetected" style="width:100%;margin-top:7px">自動検出候補だけ消す</button>
+</section>
+</div>
+<section class="panel">
+ <b>判定結果</b>
+ <div id="result" class="small" style="margin-top:7px">軌道を計算すると、反射回数・敵との接触を表示します。</div>
+ <p class="small">※これは軌道の幾何学的な予測用です。実際のモンストの当たり判定、キャラサイズ、加速・減速、敵やギミックの特殊効果を完全再現するものではありません。</p>
+</section>
+</main>
+<script>
+const canvas=document.getElementById('stage'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+let img=null, launch={x:170,y:440}, blocks=[], enemies=[], detected=[], path=[], contacts=[], drag=null, startDrag=null;
+let bgColor='#121d2d';
+function sample(){blocks=[{x:360,y:130,w:150,h:24,det:false},{x:540,y:300,w:28,h:150,det:false}];enemies=[{x:650,y:180,r:25},{x:710,y:440,r:27}];draw();status('サンプルステージです。画像を読み込んで置き換えられます。')}
+function status(t){$('status').textContent=t}
+function fitPoint(e){const r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height}}
+function draw(){
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ if(img){ctx.drawImage(img,0,0,canvas.width,canvas.height)}else{ctx.fillStyle=bgColor;ctx.fillRect(0,0,canvas.width,canvas.height);ctx.strokeStyle='#243750';ctx.lineWidth=2;for(let x=0;x<900;x+=50){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,600);ctx.stroke()}for(let y=0;y<600;y+=50){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(900,y);ctx.stroke()}}
+ // detected and manual blocks
+ blocks.forEach(b=>{ctx.fillStyle=b.det?'rgba(255,184,75,.48)':'rgba(105,183,255,.42)';ctx.strokeStyle=b.det?'#ffbd69':'#79c4ff';ctx.lineWidth=3;ctx.fillRect(b.x,b.y,b.w,b.h);ctx.strokeRect(b.x,b.y,b.w,b.h)});
+ enemies.forEach((e,i)=>{ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.fillStyle='rgba(255,80,100,.55)';ctx.fill();ctx.strokeStyle='#ff8a9a';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='white';ctx.font='bold 18px sans-serif';ctx.textAlign='center';ctx.fillText('敵',e.x,e.y+6)});
+ if(path.length){ctx.beginPath();ctx.moveTo(path[0].x,path[0].y);path.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.strokeStyle='#7dff9b';ctx.lineWidth=5;ctx.shadowColor='#27d86b';ctx.shadowBlur=8;ctx.stroke();ctx.shadowBlur=0;contacts.forEach(c=>{ctx.beginPath();ctx.arc(c.x,c.y,10,0,Math.PI*2);ctx.fillStyle='#ffea70';ctx.fill();ctx.strokeStyle='#3b2b00';ctx.stroke()})}
+ // launch marker
+ ctx.beginPath();ctx.arc(launch.x,launch.y,13,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#172235';ctx.lineWidth=4;ctx.stroke();ctx.beginPath();ctx.arc(launch.x,launch.y,5,0,Math.PI*2);ctx.fillStyle='#ff8a35';ctx.fill();
+}
+function lineRectHit(x,y,dx,dy,r){let best=Infinity,normal=null;
+ const sides=[{a:r.x,b:r.y,c:r.x+r.w,d:r.y,n:{x:-1,y:0}},{a:r.x+r.w,b:r.y,c:r.x+r.w,d:r.y+r.h,n:{x:1,y:0}},{a:r.x,b:r.y,c:r.x,d:r.y+r.h,n:{x:0,y:-1}},{a:r.x,b:r.y+r.h,c:r.x+r.w,d:r.y+r.h,n:{x:0,y:1}}];
+ // slab ray-AABB intersection
+ let tmin=-Infinity,tmax=Infinity,nrm=null;
+ for(const [pos,vel,min,max,nneg,npos] of [[x,dx,r.x,r.x+r.w,{x:-1,y:0},{x:1,y:0}],[y,dy,r.y,r.y+r.h,{x:0,y:-1},{x:0,y:1}]]){
+  if(Math.abs(vel)<1e-8){if(pos<min||pos>max)return null;continue}
+  let t1=(min-pos)/vel,t2=(max-pos)/vel,n=vel>0?nneg:npos;if(t1>t2){[t1,t2]=[t2,t1];n=vel>0?npos:nneg}
+  if(t1>tmin){tmin=t1;nrm=n}tmax=Math.min(tmax,t2);if(tmin>tmax)return null;
+ }
+ const t=tmin>1e-5?tmin:tmax>1e-5?tmax:Infinity;
+ return Number.isFinite(t)?{t,n:nrm}:null;
+}
+function calc(){
+ const angle=Number($('angle').value)*Math.PI/180, maxB=Number($('bounces').value), maxLen=Number($('length').value);
+ let x=launch.x,y=launch.y,dx=Math.cos(angle),dy=-Math.sin(angle),remaining=maxLen,b=0;
+ path=[{x,y}];contacts=[];let hitNames=[];
+ // screen edges count as reflecting walls
+ while(remaining>1&&path.length<300){
+  let best={t:Infinity,n:null,type:''};
+  const edge=[{t:dx>0?(canvas.width-x)/dx:dx<0?(0-x)/dx:Infinity,n:{x:dx>0?-1:1,y:0},type:'wall'},{t:dy>0?(canvas.height-y)/dy:dy<0?(0-y)/dy:Infinity,n:{x:0,y:dy>0?-1:1},type:'wall'}];
+  edge.forEach(h=>{if(h.t>1e-4&&h.t<best.t)best=h});
+  blocks.forEach(r=>{let h=lineRectHit(x,y,dx,dy,r);if(h&&h.t<best.t)best={...h,type:'block'}});
+  // enemy contact is recorded, but does not alter direction
+  const dist=best.t===Infinity?remaining:Math.min(best.t,remaining);
+  const x2=x+dx*dist,y2=y+dy*dist;
+  enemies.forEach((e,i)=>{const vx=x2-x,vy=y2-y,den=vx*vx+vy*vy;if(!den)return;let t=Math.max(0,Math.min(1,((e.x-x)*vx+(e.y-y)*vy)/den));let px=x+t*vx,py=y+t*vy;if(Math.hypot(e.x-px,e.y-py)<=e.r+7&&!contacts.some(c=>c.i===i&&Math.hypot(c.x-px,c.y-py)<20)){contacts.push({x:px,y:py,i});hitNames.push('敵'+(i+1))}});
+  path.push({x:x2,y:y2});remaining-=dist;
+  if(best.t===Infinity||best.t>=dist-1e-5)break;
+  if(best.type==='wall'||best.type==='block'){
+   if(b>=maxB)break;b++;if(best.n.x)dx=-dx;if(best.n.y)dy=-dy;
+   x=x2+dx*.15;y=y2+dy*.15;
+  }else break;
+ }
+ draw();
+ $('result').innerHTML=`反射回数：<b>${b}</b>回<br>敵との接触：<b>${contacts.length}</b>回${hitNames.length?'（'+[...new Set(hitNames)].join('、')+'）':''}<br>発射角度：<b>${$('angle').value}°</b><br><span style="color:#9fb0c8">緑線＝予測軌道、黄色点＝敵との接触位置</span>`;
+}
+function pointerDown(e){const p=fitPoint(e);const mode=$('mode').value;
+ if(mode==='block'){startDrag=p;drag={x:p.x,y:p.y};draw();return}
+ if(mode==='launch'){launch=p;path=[];draw();status('発射位置を設定しました。角度を調整して計算してください。')}
+ else if(mode==='enemy'){enemies.push({...p,r:24});draw();status('敵キャラを追加しました。')}
+ else if(mode==='erase'){let bi=blocks.findIndex(b=>p.x>=b.x&&p.x<=b.x+b.w&&p.y>=b.y&&p.y<=b.y+b.h);if(bi>=0)blocks.splice(bi,1);else{let ei=enemies.findIndex(e=>Math.hypot(e.x-p.x,e.y-p.y)<e.r+10);if(ei>=0)enemies.splice(ei,1)}draw()}
+}
+function pointerMove(e){if(!startDrag)return;const p=fitPoint(e);drag={x:p.x,y:p.y};draw();ctx.strokeStyle='#ffcf77';ctx.setLineDash([8,6]);ctx.lineWidth=3;ctx.strokeRect(startDrag.x,startDrag.y,p.x-startDrag.x,p.y-startDrag.y);ctx.setLineDash([])}
+function pointerUp(e){if(!startDrag)return;const p=fitPoint(e);let x=Math.min(startDrag.x,p.x),y=Math.min(startDrag.y,p.y),w=Math.abs(p.x-startDrag.x),h=Math.abs(p.y-startDrag.y);if(w>10&&h>8)blocks.push({x,y,w,h,det:false});startDrag=null;drag=null;draw();status('ブロックを追加しました。')}
+canvas.addEventListener('pointerdown',pointerDown);canvas.addEventListener('pointermove',pointerMove);canvas.addEventListener('pointerup',pointerUp);canvas.addEventListener('pointercancel',()=>{startDrag=null});
+$('imageFile').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const u=URL.createObjectURL(f),im=new Image();im.onload=()=>{img=im;blocks=[];enemies=[];path=[];launch={x:im.width*.18,y:im.height*.78};canvas.width=im.width;canvas.height=im.height;draw();status('画像を読み込みました。発射位置・ブロック・敵を設定してください。自動認識も試せます。');URL.revokeObjectURL(u)};im.src=u});
+$('resetView').onclick=()=>{img=null;canvas.width=900;canvas.height=600;blocks=[];enemies=[];path=[];launch={x:170,y:440};sample();};
+$('angle').oninput=()=>{$('angleVal').textContent=$('angle').value+'°';calc()};
+$('bounces').oninput=()=>{$('bounceVal').textContent=$('bounces').value+'回';calc()};
+$('length').oninput=()=>{$('lengthVal').textContent=$('length').value+'px';calc()};
+$('rotateL').onclick=()=>{$('angle').value=(Number($('angle').value)+355)%360;$('angle').dispatchEvent(new Event('input'))};
+$('rotateR').onclick=()=>{$('angle').value=(Number($('angle').value)+5)%360;$('angle').dispatchEvent(new Event('input'))};
+$('simulate').onclick=calc;$('clearPath').onclick=()=>{path=[];contacts=[];draw();$('result').textContent='軌道を消去しました。'};
+$('undo').onclick=()=>{if(enemies.length)enemies.pop();else if(blocks.length)blocks.pop();draw()};
+$('clearObjects').onclick=()=>{blocks=[];enemies=[];path=[];draw()};
+$('clearDetected').onclick=()=>{blocks=blocks.filter(b=>!b.det);detected=[];draw()};
+$('autoDetect').onclick=()=>{
+ if(!img){status('先にスクリーンショットを読み込んでください。');return}
+ const off=document.createElement('canvas'),w=canvas.width,h=canvas.height;off.width=w;off.height=h;const c=off.getContext('2d',{willReadFrequently:true});c.drawImage(img,0,0,w,h);const data=c.getImageData(0,0,w,h).data;
+ const cols=45,rows=30,cw=w/cols,ch=h/rows,grid=[];
+ for(let gy=0;gy<rows;gy++){grid[gy]=[];for(let gx=0;gx<cols;gx++){let dark=0,total=0;for(let sy=1;sy<=3;sy++)for(let sx=1;sx<=3;sx++){let xx=Math.min(w-1,Math.floor(gx*cw+sx*cw/4)),yy=Math.min(h-1,Math.floor(gy*ch+sy*ch/4)),k=(yy*w+xx)*4,r=data[k],g=data[k+1],b=data[k+2],lum=.2126*r+.7152*g+.0722*b;if(lum<95&&Math.max(r,g,b)-Math.min(r,g,b)<75)dark++;total++}grid[gy][gx]=dark/total>=.67}}
+ let seen=new Set(),found=[];
+ for(let gy=0;gy<rows;gy++)for(let gx=0;gx<cols;gx++){let key=gy*cols+gx;if(!grid[gy][gx]||seen.has(key))continue;let q=[[gx,gy]],cells=[];seen.add(key);while(q.length){let [x,y]=q.pop();cells.push([x,y]);for(const [nx,ny] of [[x+1,y],[x-1,y],[x,y+1],[x,y-1]]){let k=ny*cols+nx;if(nx>=0&&nx<cols&&ny>=0&&ny<rows&&grid[ny][nx]&&!seen.has(k)){seen.add(k);q.push([nx,ny])}}}let minx=Math.min(...cells.map(a=>a[0])),maxx=Math.max(...cells.map(a=>a[0])),miny=Math.min(...cells.map(a=>a[1])),maxy=Math.max(...cells.map(a=>a[1]));let bw=(maxx-minx+1)*cw,bh=(maxy-miny+1)*ch;if(cells.length>=3&&bw>12&&bh>8&&bw*bh<w*h*.15)found.push({x:minx*cw,y:miny*ch,w:bw,h:bh,det:true})}
+ blocks=blocks.filter(b=>!b.det).concat(found);draw();status(`自動検出候補を${found.length}個追加しました。誤検出があり得るため、不要な候補は「配置物を削除」で消してください。`);
+};
+sample();
+if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
+</script>
+</body></html>
